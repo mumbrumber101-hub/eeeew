@@ -344,6 +344,13 @@
             contain-intrinsic-size: 0 1200px;
         }
 
+        /* Entry links need real heights, not offscreen layout estimates. */
+        #entriesContainer.hash-navigation > section,
+        #entriesContainer.hash-navigation .entry {
+            content-visibility: visible;
+            animation: none;
+        }
+
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -3765,7 +3772,7 @@ function toggleEntry(header, updateHash = true) {
     }
 }
 
-function handleHashNavigation() {
+async function handleHashNavigation() {
     const hash = getCurrentHashSlug();
     if (!hash) return;
 
@@ -3779,12 +3786,19 @@ function handleHashNavigation() {
     hydrateEntryResearch(entry);
     if (header) header.setAttribute('aria-expanded', 'true');
 
-    setTimeout(() => {
-        const headerOffset = 140;
+    // Keep this layout stable after landing as well as during the jump.
+    // Restoring content-visibility would shrink earlier sections again.
+    document.getElementById('entriesContainer').classList.add('hash-navigation');
+    if (document.fonts) await document.fonts.ready;
+
+    requestAnimationFrame(() => {
+        if (getCurrentHashSlug() !== hash || !entry.isConnected) return;
+        const controls = document.querySelector('.controls');
+        const headerOffset = (controls ? controls.getBoundingClientRect().height : 0) + 16;
         const elementPosition = entry.getBoundingClientRect().top;
         const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
-        window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
-    }, 100);
+        window.scrollTo({ top: Math.max(0, offsetPosition), behavior: 'instant' });
+    });
 }
 
 function applyFilters() {
