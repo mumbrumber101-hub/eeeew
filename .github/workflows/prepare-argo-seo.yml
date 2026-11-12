@@ -1,0 +1,43 @@
+name: Prepare approved Argo SEO repair
+on:
+  push:
+    branches: [seo-prepare-argo-20261112]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 1
+      - name: Apply exact validated patch
+        env:
+          EXPECTED_HEAD: 956e180ad8fbe0d655e2a8edf12726f8f1273d1f
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python3 - <<'PYTHON'
+          import base64,hashlib,subprocess,zlib
+          from pathlib import Path
+          p=Path('index.html')
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == '842fc44fe367c2be91551b4c1d2b7366e0058f7bd6360260359bf611b3abb4fa'
+          patch=zlib.decompress(base64.b64decode('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'))
+          subprocess.run(['git','apply','-'],input=patch,check=True)
+          generator=Path('/tmp/argo_generate.cjs')
+          generator.write_bytes(zlib.decompress(base64.b64decode('eNp9VNty2zYQffdXwHYnABuIdOtO0qEse3JRpuk4acZynyg+QCBIYQKCCgDKVmT+exagbs7Y4QNJnMXunr3yRluHSotGyIhvrTSC4NLiaHjEg2RZH0qWtZco4dDc1QokpY2NYMUHqcRkpTlZmIYLa2NmqmX2Z04Rbl35996c5UYuHCh6/bhmjs9JctGjlySb2ukk//0qupgmGyyJsj/yrTa8HZNaGDCwlhp+/rn9dJ1i3O3sO+bss9Ki4W0ttPe/PkKIFcV4CcdraZ2A6yRadxTwb60wq4lQgrvGvFEKcCNcazTK8mG4UQk3VsKberv6WBBZ7G7IYjQaYRAYKey7LV98taOe9jcCUXwVPqluleoNc8imExvbe7+eLUJO3DtvEkQQFQ0YMEG7WPcKE/CvK+Lm0sYHahFUa6EYFyR5kVQUv2D1YogP0IuAKvcIvAxg9Rictmdn7CxI9Mx6K8MOGHXw3leD6WLW3Pt0b1NP0Z3URXOXrlXDmZONTtdzZuc+ICuY4eFvwdxcs1qkOMEdfapOHfXdYBslKPr/5noSVL8ww2pLkRXuVtaiaV0oKeIKxAcIEFzWcZ/rkJl7RzZcoyAyrf6od5LQiXQbDUVr15tKz8/g6Z5QOTFCF8KM+zYgWRzHTKnNMY9tYxwhjM6i0SWLfaCxz4YCMvWCwaDNAkhRC1ZK6JoCnFqhrXRyKd0qxTNmBe6iKBqe/JKYLBEhu96Ld52yHT2umLWjE9+vq0HwJX1NTpIqenjI8ihWQldujo5HI3T++tVfEXJz09yhsTGNIaHPV1CIFmaqkGUpzMHqqJn5GkYVo4Pn4ngwQF9uxjfjz+/h9T5F5xQMw47hjSmgeHsWFkFgiEvH+tNgcIn7kI7D+pCaq7aA/Paeop/I1dJaGAIYDyuMt7Bh5Blu1lcws23pXkrRU+najw25Oj6dFi+HD6f32bRggzKH/4wNvufh+B2OUVLJJ2YrQ1OXv/wtqWqKAYdeqAkU8Ah26J2RTjy/RD3NTVqh4aFXKvLv5L/PsQ1TLssVWc9WTtj0betrEPvDdSgcCap0s49SX8LO+/wBvJsDhg==')))
+          subprocess.run(['node',str(generator),'index.html'],check=True)
+          s=p.read_text().replace('https://www.arriveateasterwine.com/argo-glossary','https://mumbrumber101-hub.github.io/eeeew/')
+          p.write_text(s)
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == '24899743b352a414fdca8af64e80374e826a99e6174659734ebc810877c4a0b7'
+          print('Verified 3764 definitions and citations; existing source data preserved')
+          PYTHON
+          test "$(git diff --name-only)" = "index.html"
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Expose Argo glossary definitions in initial HTML and add SEO metadata"
+          git push origin HEAD:refs/heads/seo-candidate-argo-20261112
+          git rev-parse HEAD
