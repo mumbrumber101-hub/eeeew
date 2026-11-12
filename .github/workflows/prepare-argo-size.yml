@@ -1,0 +1,204 @@
+name: Prepare Argo document size repair
+on:
+  push:
+    branches: [seo-prepare-argo-size-20261112]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 1
+      - name: Apply verified Argo resource split
+        env:
+          EXPECTED_HEAD: 9bc55a25d0694362811349195e193ada464ead3f
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python3 - <<'PYTHON'
+          import sys
+          sys.argv=['transform.py','index.html','/tmp/argo-size-candidate']
+          #!/usr/bin/env python3
+          """Reproduce the reviewed Argo packaging change from one guarded source file.
+          
+          Uses only Python's standard library. Does not perform network or git writes.
+          Usage: python transform.py ORIGINAL_HTML OUTPUT_DIRECTORY
+          """
+          from pathlib import Path
+          import base64
+          import hashlib
+          import html
+          import json
+          import re
+          import sys
+          
+          SOURCE_SHA256 = '24899743b352a414fdca8af64e80374e826a99e6174659734ebc810877c4a0b7'
+          RESOURCE_BUDGET = 1_900_000
+          
+          
+          def main(source_path, output_path):
+              raw = Path(source_path).read_bytes()
+              actual = hashlib.sha256(raw).hexdigest()
+              if actual != SOURCE_SHA256:
+                  raise SystemExit(f'Source changed: expected {SOURCE_SHA256}, got {actual}')
+              source = raw.decode('utf-8')
+              target = Path(output_path)
+              target.mkdir(parents=True, exist_ok=True)
+              assets = target / 'assets'
+              assets.mkdir(exist_ok=True)
+              generated = {}
+              changes = []
+          
+              def write(relative, value):
+                  content = value.encode('utf-8') if isinstance(value, str) else value
+                  path = target / relative
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  path.write_bytes(content)
+                  generated[relative] = {'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()}
+          
+              # Keep CSS cascade order. The no-JavaScript rule remains in its noscript tag.
+              styles = list(re.finditer(r'<style\b([^>]*)>(.*?)</style>', source, re.S))
+              image_records = []
+              style_records = []
+              for index, match in enumerate(styles[:2], 1):
+                  original_css = match.group(2)
+                  css = original_css
+          
+                  def external_image(image):
+                      mime, encoded = image.groups()
+                      if mime != 'image/jpeg':
+                          raise ValueError(f'Unexpected embedded image MIME: {mime}')
+                      binary = base64.b64decode(encoded, validate=True)
+                      digest = hashlib.sha256(binary).hexdigest()
+                      relative = f'assets/media/{digest}.jpg'
+                      write(relative, binary)
+                      image_records.append({'path': relative, 'sha256': digest, 'bytes': len(binary), 'data_uri': image.group(0)})
+                      return f'media/{digest}.jpg'
+          
+                  css = re.sub(r'data:([^;]+);base64,([A-Za-z0-9+/=]+)', external_image, css)
+                  css_path = f'assets/glossary-{index}.css'
+                  write(css_path, css)
+                  restored = css
+                  for record in image_records:
+                      restored = restored.replace('media/' + Path(record['path']).name, record['data_uri'])
+                  assert restored == original_css
+                  style_records.append({'path': css_path, 'css_equivalent_after_asset_resolution': True})
+                  changes.append((match.start(), match.end(), f'<link rel="stylesheet" href="{css_path}">'))
+          
+              # Preserve every raw JSON object; divide only the array declaration.
+              scripts = list(re.finditer(r'<script\b[^>]*>(.*?)</script>', source, re.S))
+              assert len(scripts) == 1
+              script_match = scripts[0]
+              original_js = script_match.group(1)
+              declaration = 'const glossaryData = '
+              declaration_start = original_js.index(declaration)
+              array_start = declaration_start + len(declaration)
+              decoder = json.JSONDecoder()
+              records, array_length = decoder.raw_decode(original_js[array_start:])
+              array_end = array_start + array_length
+              assert len(records) == 3764 and original_js[array_end] == ';'
+              raw_array = original_js[array_start:array_end]
+              raw_records = []
+              cursor = 1
+              while cursor < len(raw_array):
+                  while raw_array[cursor].isspace() or raw_array[cursor] == ',':
+                      cursor += 1
+                  if raw_array[cursor] == ']':
+                      break
+                  _, length = decoder.raw_decode(raw_array[cursor:])
+                  raw_records.append(raw_array[cursor:cursor + length])
+                  cursor += length
+              assert len(raw_records) == len(records)
+              assert '[' + ','.join(raw_records) + ']' == raw_array
+              assert [json.loads(item) for item in raw_records] == records
+              midpoint = len(records) // 2
+              write('assets/glossary-data-1.js', 'const glossaryData = [' + ','.join(raw_records[:midpoint]) + '];\n')
+              write('assets/glossary-data-2.js', 'glossaryData.push(...[' + ','.join(raw_records[midpoint:]) + ']);\n')
+              logic = original_js[:declaration_start] + original_js[array_end + 1:]
+              write('assets/glossary-app.js', logic)
+              loader = '\n'.join(f'<script defer src="assets/{name}"></script>' for name in ('glossary-data-1.js', 'glossary-data-2.js', 'glossary-app.js'))
+              changes.append((script_match.start(), script_match.end(), loader))
+          
+              # A compact native disclosure serves the exact same content before the app
+              # hydrates. Existing app code replaces this container with its original UI.
+              opening = '<div id="entriesContainer">'
+              start = source.index(opening) + len(opening)
+              ending = '\n        </div>\n    </main>'
+              end = source.index(ending, start)
+              original_entries = source[start:end]
+              articles = re.findall(r'<article class="entry"[^>]*>.*?</article>', original_entries, re.S)
+              assert len(articles) == 3764
+              compact = []
+              equivalence = []
+              for article in articles:
+                  identifier = re.search(r'<article[^>]+\bid="([^"]+)"', article).group(1)
+                  assert re.fullmatch(r'[a-z0-9_-]+', identifier)
+                  title = re.search(r'<h3 class="entry-title">(.*?)</h3>', article, re.S).group(1)
+                  definition_match = re.search(r'<div class="entry-definition">(.*?)</div>(?:<p class="entry-citations">(.*?)</p>)?\s*</div>\s*</article>', article, re.S)
+                  assert definition_match is not None
+                  definition, citations = definition_match.groups()
+                  citations = citations or ''
+                  compact.append(f'<details id={identifier}><summary>{title}</summary>{definition}' + (f'<p>{citations}</p>' if citations else '') + '</details>')
+                  equivalence.append({'id': identifier, 'title': title, 'definition': definition, 'citations': citations})
+              changes.append((start, end, ''.join(compact)))
+          
+              result = source
+              for begin, finish, replacement in sorted(changes, reverse=True):
+                  result = result[:begin] + replacement + result[finish:]
+              write('index.html', result)
+              for relative, details in generated.items():
+                  assert details['bytes'] < RESOURCE_BUDGET, (relative, details['bytes'])
+              # Metadata is kept verbatim, including the current self-canonical.
+              for tag in re.findall(r'<(?:meta|link)\b[^>]*(?:canonical|og:|twitter:|description)[^>]*>', source):
+                  assert tag in result
+              proof = {
+                  'source_sha256': actual,
+                  'source_bytes': len(raw),
+                  'records': len(records),
+                  'ssr_entries': len(equivalence),
+                  'ssr_title_definition_citation_hash': hashlib.sha256(json.dumps(equivalence, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest(),
+                  'data_records_unchanged': True,
+                  'data_json_byte_identical_when_reassembled': True,
+                  'data_json_sha256': hashlib.sha256(raw_array.encode()).hexdigest(),
+                  'application_logic_unchanged': True,
+                  'application_logic_sha256': hashlib.sha256(logic.encode()).hexdigest(),
+                  'styles': style_records,
+                  'images': [{k: v for k, v in item.items() if k != 'data_uri'} for item in image_records],
+                  'resource_budget': RESOURCE_BUDGET,
+                  'resources': generated,
+                  'canonical_preserved': 'https://mumbrumber101-hub.github.io/eeeew/',
+                  'no_remote_mutation': True,
+              }
+              (target / 'build-proof.json').write_text(json.dumps(proof, indent=2))
+              (target / 'ssr-equivalence.json').write_text(json.dumps(equivalence, ensure_ascii=False))
+              print(json.dumps(proof, indent=2))
+          
+          
+          if __name__ == '__main__':
+              if len(sys.argv) != 3:
+                  raise SystemExit('Usage: python transform.py ORIGINAL_HTML OUTPUT_DIRECTORY')
+              main(*sys.argv[1:])
+          
+          expected={"assets/glossary-1.css":{"bytes":33953,"sha256":"fbf9c30263a4a1fad5950c6ecef44596344738147404150a69a9e5be10c4432a"},"assets/media/25ae589eef990fd12b1bd415bc96e82b8bdabbf18223d39f194719f4b3133d17.jpg":{"bytes":295347,"sha256":"25ae589eef990fd12b1bd415bc96e82b8bdabbf18223d39f194719f4b3133d17"},"assets/glossary-2.css":{"bytes":9307,"sha256":"bcfd463f8e86a36531b78ca2e32b11d7c457b64728bd48accc65abd4b9f519e4"},"assets/glossary-data-1.js":{"bytes":1031372,"sha256":"d4755a5ef2de06ffa68a84e09959348d9b55bbe5a274be27b31c4aee3ae677c3"},"assets/glossary-data-2.js":{"bytes":975328,"sha256":"6f7d5dd68420e9860198348f0380a67c3578089e6c28f9437997b879d06d670c"},"assets/glossary-app.js":{"bytes":104500,"sha256":"0397671d60d6ef5fa282d7aa89d76933784e3907b9946e8983d1cd9b22e8acfa"},"index.html":{"bytes":1887862,"sha256":"bced2eb5bcbd16dab9b8bd731d2fa4b3e1d4c25b03e5c84731c9c12a052e8487"}}
+          for relative, meta in expected.items():
+              content=(Path('/tmp/argo-size-candidate')/relative).read_bytes()
+              assert hashlib.sha256(content).hexdigest()==meta['sha256']
+              assert len(content)==meta['bytes']
+              target=Path(relative)
+              if relative!='index.html':
+                  assert not target.exists(), 'Asset path collision: '+relative
+              target.parent.mkdir(parents=True,exist_ok=True)
+              target.write_bytes(content)
+          print('Verified seven deployment files and all 3764 glossary entries')
+          PYTHON
+          test "$(git diff --name-only)" = "index.html"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html assets/glossary-1.css assets/glossary-2.css assets/glossary-data-1.js assets/glossary-data-2.js assets/glossary-app.js assets/media/25ae589eef990fd12b1bd415bc96e82b8bdabbf18223d39f194719f4b3133d17.jpg
+          git diff --cached --stat
+          git commit -m "Fit all Argo definitions in crawlable HTML and separate unchanged resources"
+          git push origin HEAD:refs/heads/seo-candidate-argo-size-20261112
+          git rev-parse HEAD
