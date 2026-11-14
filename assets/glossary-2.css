@@ -124,8 +124,8 @@ html.aae-embedded .epigraph{padding:0;margin:0 auto}
 .controls{padding:16px 20px;background:var(--paper);border-color:var(--rule)}
 .controls-inner{max-width:1000px;gap:12px;min-width:0}
 .controls-inner>*{min-width:0}
-.letter-nav{flex:1 0 100%;gap:2px}
-.letter-btn{flex:0 0 32px;width:32px;height:44px;padding:0;border:1px solid transparent;border-radius:2px;font:400 14px/1 var(--sans);letter-spacing:0;color:var(--ink)}
+.letter-nav{flex:1 0 100%;gap:2px;flex-wrap:nowrap;overflow-x:auto}
+.letter-btn{flex:0 0 31px;min-width:31px;width:31px;height:44px;padding:0;border:1px solid transparent;border-radius:2px;font:400 14px/1 var(--sans);letter-spacing:0;color:var(--ink)}
 .letter-btn[data-all="true"]{flex-basis:44px;width:44px}
 .letter-btn:hover{color:var(--burgundy);background:var(--cream-dark);border-color:var(--border)}
 .letter-btn.active{background:var(--burgundy);border:1px solid var(--burgundy);color:var(--paper)}
@@ -208,7 +208,7 @@ footer{border-top:1px solid var(--rule);padding:24px 20px;background:var(--paper
  .search-container{flex:auto;order:-1;width:100%}
  .search-input{font-size:16px}
  .letter-nav{flex:auto;flex-wrap:nowrap;justify-content:flex-start;gap:4px;overflow-x:auto;overscroll-behavior-x:contain;width:100%;padding:3px 3px 6px;scroll-padding-inline:3px}
- .letter-btn{flex-basis:44px;width:44px}
+ .letter-btn{flex-basis:44px;min-width:44px;width:44px}
  .toggle-buttons{justify-content:flex-start}
  .book-filter{flex:auto;justify-content:flex-start;width:100%}
  .book-filter-select{font-size:16px}
