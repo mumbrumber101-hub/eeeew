@@ -1,3 +1,4 @@
+if(window.self!==window.top)document.documentElement.classList.add("aae-embedded");
 
         // Glossary data
         
